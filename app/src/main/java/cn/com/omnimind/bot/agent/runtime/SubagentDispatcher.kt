@@ -127,7 +127,7 @@ class SubagentDispatcher(
     ): SubagentRunResult {
         val profile = SubagentProfileRegistry.get(spec.profileId)
         val subagentId = "subagent-${UUID.randomUUID().toString().take(8)}"
-        return try {
+        val taskResult = try {
             emitProgress(
                 progressReporter,
                 progressSequence,
