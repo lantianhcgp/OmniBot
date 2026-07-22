@@ -167,7 +167,8 @@ class SubagentProfileRegistryTest {
     fun `isForbidden flags critical mutating tools`() {
         // file_write 不再 forbidden(general 允许写),仅保留真正系统不变量
         assertTrue(SubagentProfileRegistry.isForbidden("subagent_dispatch"))
-        assertTrue(SubagentProfileRegistry.isForbidden("terminal_execute"))
+        // terminal_execute removed from FORBIDDEN - allowTerminal profiles can use it
+        // assertTrue(SubagentProfileRegistry.isForbidden("terminal_execute"))
         assertTrue(SubagentProfileRegistry.isForbidden("android_privileged_action"))
         assertTrue(SubagentProfileRegistry.isForbidden("file_delete"))
         // file_write / file_edit / memory_search 现在不在 FORBIDDEN 里
