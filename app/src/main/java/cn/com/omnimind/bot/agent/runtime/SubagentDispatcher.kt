@@ -233,7 +233,6 @@ class SubagentDispatcher(
                     )
                 }
             }
-            taskResult
         } catch (ce: CancellationException) {
             throw ce
         } catch (e: Exception) {
@@ -312,118 +311,6 @@ class SubagentDispatcher(
                 toolName = toolName
             )
         )
-    }
-
-    /**
-     * Raw subagent execution without maintenance trigger.
-     * Used by the maintenance auto-trigger to avoid infinite recursion.
-     */
-    private suspend fun runSingleSubagentRaw(
-        parentEnv: AgentExecutionEnvironment,
-        taskIndex: Int,
-        spec: SubagentTaskSpec,
-        progressReporter: (suspend (SubagentProgressEvent) -> Unit)?,
-        progressSequence: AtomicLong
-    ): SubagentRunResult {
-        val profile = SubagentProfileRegistry.get(spec.profileId)
-        val subagentId = "subagent-${UUID.randomUUID().toString().take(8)}"
-        return try {
-            val filteredCatalog = SubagentToolCatalogView(
-                parent = parentCatalogProvider(),
-                allowed = profile.allowedTools,
-                allowTerminal = profile.allowTerminal
-            )
-            val systemMessage = ChatCompletionMessage(
-                role = "system",
-                content = JsonPrimitive(profile.systemPrompt)
-            )
-            val userMessage = ChatCompletionMessage(
-                role = "user",
-                content = JsonPrimitive(spec.instruction)
-            )
-            val subEnv = DefaultAgentExecutionEnvironment(
-                agentRunId = subagentId,
-                userMessage = spec.instruction,
-                runtimeContextRepository = parentEnv.runtimeContextRepository,
-                workspaceDescriptor = parentEnv.workspaceDescriptor,
-                resolvedSkills = emptyList(),
-                failureLearningSkill = null,
-                workspaceManager = parentEnv.workspaceManager,
-                workspaceMemoryService = parentEnv.workspaceMemoryService,
-                conversationMode = parentEnv.conversationMode,
-                reasoningEffort = parentEnv.reasoningEffort,
-                terminalEnvironment = parentEnv.terminalEnvironment,
-                runControl = NoOpAgentRunControl,
-                longTermMemoryIndex = parentEnv.longTermMemoryIndex,
-                turnMemoryLoadTracker = TurnMemoryLoadTracker()
-            )
-            val silentCallback = ReportingSubagentCallback(
-                taskIndex = taskIndex,
-                subagentId = subagentId,
-                profileId = profile.id,
-                progressReporter = progressReporter,
-                progressSequence = progressSequence
-            )
-            val orchestrator = AgentOrchestrator(
-                llmClient = llmClient,
-                toolRegistry = filteredCatalog,
-                toolRouter = toolExecutorProvider(),
-                eventAdapter = eventAdapter,
-                model = model,
-                toolImageContinuationPolicy = toolImageContinuationPolicy
-            )
-            val result = orchestrator.run(
-                AgentOrchestrator.Input(
-                    callback = silentCallback,
-                    initialMessages = listOf(systemMessage, userMessage),
-                    executionEnv = subEnv,
-                    conversationId = null,
-                    contextCompactor = null
-                )
-            )
-            when (result) {
-                is AgentResult.Success -> SubagentRunResult(
-                    subagentId = subagentId, profileId = profile.id,
-                    taskIndex = taskIndex, status = "completed",
-                    finalContent = result.response.content,
-                    toolCallSummaries = silentCallback.toolSummaries()
-                )
-                is AgentResult.Error -> SubagentRunResult(
-                    subagentId = subagentId, profileId = profile.id,
-                    taskIndex = taskIndex, status = "failed",
-                    finalContent = "", toolCallSummaries = silentCallback.toolSummaries(),
-                    errorMessage = result.message
-                )
-            }
-        } catch (ce: CancellationException) { throw ce
-        } catch (e: Exception) { SubagentRunResult(
-            subagentId = subagentId, profileId = profile.id,
-            taskIndex = taskIndex, status = "failed", finalContent = "",
-            toolCallSummaries = emptyList(),
-            errorMessage = e.message ?: "subagent execution failed"
-        ) }
-    }
-
-    /**
-     * Build the maintenance instruction from a completed task's execution record.
-     */
-    private fun buildMaintenanceInstruction(
-        spec: SubagentTaskSpec,
-        result: SubagentRunResult
-    ): String {
-        return buildString {
-            appendLine("以下是上一个专家的执行记录：")
-            appendLine("- 专家: ${spec.profileId}")
-            appendLine("- 任务: ${spec.instruction}")
-            appendLine("- 工具调用: ${result.toolCallSummaries.joinToString(", ")}")
-            appendLine("- 状态: ${result.status}")
-            if (result.errorMessage != null) {
-                appendLine("- 错误: ${result.errorMessage}")
-            }
-            appendLine("- 结果摘要: ${result.finalContent.take(500)}")
-            appendLine()
-            appendLine("请分析并记录经验。如果没有值得记录的内容，直接跳过。")
-        }
     }
 
     private fun compactProgressText(text: String, limit: Int = 160): String {
@@ -553,6 +440,118 @@ private class ReportingSubagentCallback(
         val candidate = lines.lastOrNull().orEmpty()
         return compactProgressText(candidate)
     }
+    /**
+     * Raw subagent execution without maintenance trigger.
+     * Used by the maintenance auto-trigger to avoid infinite recursion.
+     */
+    private suspend fun runSingleSubagentRaw(
+        parentEnv: AgentExecutionEnvironment,
+        taskIndex: Int,
+        spec: SubagentTaskSpec,
+        progressReporter: (suspend (SubagentProgressEvent) -> Unit)?,
+        progressSequence: AtomicLong
+    ): SubagentRunResult {
+        val profile = SubagentProfileRegistry.get(spec.profileId)
+        val subagentId = "subagent-${UUID.randomUUID().toString().take(8)}"
+        return try {
+            val filteredCatalog = SubagentToolCatalogView(
+                parent = parentCatalogProvider(),
+                allowed = profile.allowedTools,
+                allowTerminal = profile.allowTerminal
+            )
+            val systemMessage = ChatCompletionMessage(
+                role = "system",
+                content = JsonPrimitive(profile.systemPrompt)
+            )
+            val userMessage = ChatCompletionMessage(
+                role = "user",
+                content = JsonPrimitive(spec.instruction)
+            )
+            val subEnv = DefaultAgentExecutionEnvironment(
+                agentRunId = subagentId,
+                userMessage = spec.instruction,
+                runtimeContextRepository = parentEnv.runtimeContextRepository,
+                workspaceDescriptor = parentEnv.workspaceDescriptor,
+                resolvedSkills = emptyList(),
+                failureLearningSkill = null,
+                workspaceManager = parentEnv.workspaceManager,
+                workspaceMemoryService = parentEnv.workspaceMemoryService,
+                conversationMode = parentEnv.conversationMode,
+                reasoningEffort = parentEnv.reasoningEffort,
+                terminalEnvironment = parentEnv.terminalEnvironment,
+                runControl = NoOpAgentRunControl,
+                longTermMemoryIndex = parentEnv.longTermMemoryIndex,
+                turnMemoryLoadTracker = TurnMemoryLoadTracker()
+            )
+            val silentCallback = ReportingSubagentCallback(
+                taskIndex = taskIndex,
+                subagentId = subagentId,
+                profileId = profile.id,
+                progressReporter = progressReporter,
+                progressSequence = progressSequence
+            )
+            val orchestrator = AgentOrchestrator(
+                llmClient = llmClient,
+                toolRegistry = filteredCatalog,
+                toolRouter = toolExecutorProvider(),
+                eventAdapter = eventAdapter,
+                model = model,
+                toolImageContinuationPolicy = toolImageContinuationPolicy
+            )
+            val result = orchestrator.run(
+                AgentOrchestrator.Input(
+                    callback = silentCallback,
+                    initialMessages = listOf(systemMessage, userMessage),
+                    executionEnv = subEnv,
+                    conversationId = null,
+                    contextCompactor = null
+                )
+            )
+            when (result) {
+                is AgentResult.Success -> SubagentRunResult(
+                    subagentId = subagentId, profileId = profile.id,
+                    taskIndex = taskIndex, status = "completed",
+                    finalContent = result.response.content,
+                    toolCallSummaries = silentCallback.toolSummaries()
+                )
+                is AgentResult.Error -> SubagentRunResult(
+                    subagentId = subagentId, profileId = profile.id,
+                    taskIndex = taskIndex, status = "failed",
+                    finalContent = "", toolCallSummaries = silentCallback.toolSummaries(),
+                    errorMessage = result.message
+                )
+            }
+        } catch (ce: CancellationException) { throw ce
+        } catch (e: Exception) { SubagentRunResult(
+            subagentId = subagentId, profileId = profile.id,
+            taskIndex = taskIndex, status = "failed", finalContent = "",
+            toolCallSummaries = emptyList(),
+            errorMessage = e.message ?: "subagent execution failed"
+        ) }
+    }
+
+    /**
+     * Build the maintenance instruction from a completed task's execution record.
+     */
+    private fun buildMaintenanceInstruction(
+        spec: SubagentTaskSpec,
+        result: SubagentRunResult
+    ): String {
+        return buildString {
+            appendLine("以下是上一个专家的执行记录：")
+            appendLine("- 专家: ${spec.profileId}")
+            appendLine("- 任务: ${spec.instruction}")
+            appendLine("- 工具调用: ${result.toolCallSummaries.joinToString(", ")}")
+            appendLine("- 状态: ${result.status}")
+            if (result.errorMessage != null) {
+                appendLine("- 错误: ${result.errorMessage}")
+            }
+            appendLine("- 结果摘要: ${result.finalContent.take(500)}")
+            appendLine()
+            appendLine("请分析并记录经验。如果没有值得记录的内容，直接跳过。")
+        }
+    }
+
 
     private fun compactProgressText(text: String, limit: Int = 160): String {
         val normalized = text
