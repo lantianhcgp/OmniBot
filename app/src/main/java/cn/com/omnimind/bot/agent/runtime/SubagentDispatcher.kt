@@ -314,7 +314,6 @@ class SubagentDispatcher(
         )
     }
 
-
     /**
      * Raw subagent execution without maintenance trigger.
      * Used by the maintenance auto-trigger to avoid infinite recursion.
@@ -329,15 +328,6 @@ class SubagentDispatcher(
         val profile = SubagentProfileRegistry.get(spec.profileId)
         val subagentId = "subagent-${UUID.randomUUID().toString().take(8)}"
         return try {
-            emitProgress(
-                progressReporter,
-                progressSequence,
-                kind = "subagent_started",
-                taskIndex = taskIndex,
-                subagentId = subagentId,
-                profileId = profile.id,
-                summary = "SubAgent #${taskIndex + 1} 开始：${compactProgressText(spec.instruction)}"
-            )
             val filteredCatalog = SubagentToolCatalogView(
                 parent = parentCatalogProvider(),
                 allowed = profile.allowedTools,
@@ -435,6 +425,7 @@ class SubagentDispatcher(
             appendLine("请分析并记录经验。如果没有值得记录的内容，直接跳过。")
         }
     }
+
     private fun compactProgressText(text: String, limit: Int = 160): String {
         val normalized = text
             .replace(Regex("\\s+"), " ")
@@ -563,4 +554,11 @@ private class ReportingSubagentCallback(
         return compactProgressText(candidate)
     }
 
-
+    private fun compactProgressText(text: String, limit: Int = 160): String {
+        val normalized = text
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (normalized.length <= limit) return normalized
+        return normalized.take(limit).trimEnd() + "..."
+    }
+}
