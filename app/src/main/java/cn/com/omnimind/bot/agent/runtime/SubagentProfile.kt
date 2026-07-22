@@ -1,5 +1,7 @@
 package cn.com.omnimind.bot.agent
 
+import java.io.File
+
 /**
  * A subagent profile defines the persona / tool budget / model budget of a
  * spawned subagent. Each profile is designed to be a *capable* specialist
@@ -11,13 +13,17 @@ package cn.com.omnimind.bot.agent
  * what a profile attempts to allow):
  *  - `subagent_dispatch` → blocks recursive spawning (defense in depth on
  *    top of the dispatcher's own structural guard)
- *  - `terminal_execute` / all `android_privileged_*` / `terminal_session_*`
- *    → no privileged or shell execution from a subagent; the parent must
+ *  - `android_privileged_*` / `terminal_session_*`
+ *    → no privileged or session execution from a subagent; the parent must
  *    request these tools explicitly so the user sees the confirmation flow
  *
  * Everything else is a *profile-level* choice. The whitelist is the source
  * of truth — the system prompt should not enumerate "you cannot use X",
  * because a tool the subagent never sees in `tools` is already invisible.
+ *
+ * The [allowTerminal] flag controls whether `terminal_execute` is added to
+ * the effective tool set. When true, the SubagentToolCatalogView will
+ * include terminal_execute in addition to the declared [allowedTools].
  */
 data class SubagentProfile(
     val id: String,
@@ -25,14 +31,29 @@ data class SubagentProfile(
     val systemPrompt: String,
     val allowedTools: Set<String>,
     val maxRounds: Int = 12,
-    val maxOutputTokens: Int = 4096
+    val maxOutputTokens: Int = 4096,
+    val allowTerminal: Boolean = false
+)
+
+/**
+ * Minimal data class for parsing expert.yaml files.
+ */
+@kotlinx.serialization.Serializable
+data class ExpertProfileYaml(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val model: String? = null,
+    val maxRounds: Int = 12,
+    val maxOutputTokens: Int = 4096,
+    val allowTerminal: Boolean = false,
+    val tools: List<String> = emptyList()
 )
 
 object SubagentProfileRegistry {
 
     private val FORBIDDEN: Set<String> = setOf(
         "subagent_dispatch",
-        "terminal_execute",
         "android_privileged_action",
         "android_privileged_session_start",
         "android_privileged_session_exec",
@@ -140,12 +161,133 @@ object SubagentProfileRegistry {
         maxRounds = 3
     )
 
-    private val byId: Map<String, SubagentProfile> = listOf(
+    // ==================== File-based profile loading ====================
+
+    private val builtins: Map<String, SubagentProfile> = listOf(
         general, explorer, memoryCurator, planner
     ).associateBy { it.id }
 
+    /**
+     * Load expert profiles from a directory structure:
+     *   expertsDir/
+     *     researcher/
+     *       expert.yaml
+     *       prompt.md
+     *     coder/
+     *       expert.yaml
+     *       prompt.md
+     *     ...
+     */
+    fun loadFromDirectory(dir: File): List<SubagentProfile> {
+        if (!dir.exists() || !dir.isDirectory) return emptyList()
+        return dir.listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { loadSingleExpert(it) }
+            ?: emptyList()
+    }
+
+    private fun loadSingleExpert(dir: File): SubagentProfile? {
+        val yamlFile = File(dir, "expert.yaml")
+        val promptFile = File(dir, "prompt.md")
+        if (!yamlFile.exists() || !promptFile.exists()) return null
+
+        return try {
+            val yamlContent = yamlFile.readText()
+            val config = parseYaml(yamlContent)
+            val prompt = promptFile.readText().trim()
+            val tools = config.tools.toSet() - FORBIDDEN
+
+            SubagentProfile(
+                id = config.id,
+                displayName = config.name,
+                systemPrompt = prompt,
+                allowedTools = tools,
+                maxRounds = config.maxRounds,
+                maxOutputTokens = config.maxOutputTokens,
+                allowTerminal = config.allowTerminal && "terminal_execute" in tools
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Simple YAML parser for expert.yaml files.
+     * Does not depend on external YAML libraries.
+     */
+    private fun parseYaml(content: String): ExpertProfileYaml {
+        val map = mutableMapOf<String, String>()
+        val toolsList = mutableListOf<String>()
+        var inTools = false
+
+        for (line in content.lines()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+
+            if (trimmed == "tools:") {
+                inTools = true
+                continue
+            }
+            if (inTools) {
+                if (trimmed.startsWith("- ")) {
+                    toolsList.add(
+                        trimmed.removePrefix("- ").trim().removeSurrounding("\"")
+                    )
+                    continue
+                } else {
+                    inTools = false
+                }
+            }
+
+            val colonIdx = trimmed.indexOf(':')
+            if (colonIdx > 0) {
+                val key = trimmed.substring(0, colonIdx).trim()
+                val value = trimmed.substring(colonIdx + 1).trim()
+                    .removeSurrounding("\"")
+                map[key] = value
+            }
+        }
+
+        return ExpertProfileYaml(
+            id = map["id"] ?: "",
+            name = map["name"] ?: map["id"] ?: "",
+            description = map["description"] ?: "",
+            model = map["model"]?.takeIf { it != "null" && it.isNotEmpty() },
+            maxRounds = map["max_rounds"]?.toIntOrNull() ?: 12,
+            maxOutputTokens = map["max_output_tokens"]?.toIntOrNull() ?: 4096,
+            allowTerminal = map["allow_terminal"]?.toBooleanStrictOrNull() ?: false,
+            tools = toolsList
+        )
+    }
+
+    // ==================== Registry ====================
+
+    /**
+     * All profiles: builtins + file-loaded.
+     * File profiles take precedence over builtins with the same id,
+     * allowing user customization of builtin profiles.
+     */
+    private val byId: Map<String, SubagentProfile> by lazy {
+        val fileProfiles = loadFromDirectory(
+            File("/workspace/.omnibot/experts")
+        ).associateBy { it.id }
+        builtins + fileProfiles
+    }
+
     fun get(id: String?): SubagentProfile {
         val key = id?.trim()?.lowercase().orEmpty()
+        return byId[key] ?: general
+    }
+
+    /**
+     * Get with explicit experts directory (for runtime context).
+     */
+    fun get(id: String?, expertsDir: File?): SubagentProfile {
+        val key = id?.trim()?.lowercase().orEmpty()
+        if (expertsDir != null && expertsDir.exists()) {
+            val dynamic = loadSingleExpert(File(expertsDir, key))
+            if (dynamic != null) return dynamic
+        }
         return byId[key] ?: general
     }
 

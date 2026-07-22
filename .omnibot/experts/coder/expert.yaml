@@ -1,0 +1,17 @@
+id: coder
+name: 代码专家
+description: 写代码、调试、运行脚本、代码审查。适用于编程、脚本开发、bug 修复等任务。
+model: null
+max_rounds: 20
+max_output_tokens: 8192
+allow_terminal: true
+tools:
+  - terminal_execute
+  - file_read
+  - file_write
+  - file_edit
+  - file_list
+  - file_search
+  - file_stat
+  - memory_search
+  - memory_write_daily

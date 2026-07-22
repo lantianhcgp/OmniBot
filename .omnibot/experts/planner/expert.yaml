@@ -1,0 +1,8 @@
+id: planner
+name: 规划专家
+description: 任务拆解、排优先级、制定执行计划。适用于复杂任务的规划和分解。
+model: null
+max_rounds: 3
+max_output_tokens: 2048
+allow_terminal: false
+tools: []

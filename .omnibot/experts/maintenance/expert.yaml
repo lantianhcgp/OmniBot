@@ -1,0 +1,15 @@
+id: maintenance
+name: 维护专家
+description: 任务完成后自动触发，记录经验、错误、改进点。不需要用户手动调用。
+model: null
+max_rounds: 5
+max_output_tokens: 2048
+allow_terminal: true
+tools:
+  - terminal_execute
+  - file_read
+  - file_write
+  - file_edit
+  - memory_write_daily
+  - memory_upsert_longterm
+  - memory_search
