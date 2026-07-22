@@ -1,0 +1,15 @@
+id: writer
+name: 文档专家
+description: 写报告、整理笔记、生成文档、内容创作。适用于文档撰写、知识整理、内容生成等任务。
+model: null
+max_rounds: 10
+max_output_tokens: 4096
+allow_terminal: false
+tools:
+  - file_read
+  - file_write
+  - file_edit
+  - browser_use
+  - memory_search
+  - memory_load
+  - memory_write_daily

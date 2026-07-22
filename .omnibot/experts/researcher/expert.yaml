@@ -1,0 +1,14 @@
+id: researcher
+name: 信息检索专家
+description: 搜索、抓取网页、整理归纳、事实核查。适用于需要查找资料、验证信息、整理知识的任务。
+model: null
+max_rounds: 15
+max_output_tokens: 4096
+allow_terminal: false
+tools:
+  - browser_use
+  - file_read
+  - file_write
+  - memory_search
+  - memory_load
+  - memory_write_daily
