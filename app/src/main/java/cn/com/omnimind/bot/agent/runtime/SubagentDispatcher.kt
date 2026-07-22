@@ -92,7 +92,7 @@ class SubagentDispatcher(
         progressReporter: (suspend (SubagentProgressEvent) -> Unit)? = null
     ): List<SubagentRunResult> {
         if (tasks.isEmpty()) return emptyList()
-        val limit = coerceIn(1, 10)
+        val limit = concurrency.coerceIn(1, 10)
         val progressSequence = AtomicLong(0)
         emitProgress(
             progressReporter,
